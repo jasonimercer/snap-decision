@@ -101,108 +101,229 @@ T getDefaultDatabaseValue(const std::string& column_name)
   throw std::invalid_argument("Invalid column name or type for default value: " + column_name);
 }
 
-template <typename T>
-bool setColumnValue(QSqlDatabase& db, const DiagnosticFunction& diagnostic, const std::string& primaryKey,
-                    const std::string& column_name, const T& value)
+// Helper function to extract filename from absolute path
+std::string extractFilename(const std::string& absolutePath)
 {
-  if (!db.isOpen())
-  {
-    diagnostic(LogLevel::Error, "Database is not open.");
-    return false;
-  }
+    return QFileInfo(QString::fromStdString(absolutePath)).fileName().toStdString();
+}
 
-  // Check if the row exists
-  QSqlQuery checkQuery(db);
-  checkQuery.prepare("SELECT COUNT(*) FROM image_data WHERE absolute_path = :primaryKey");
-  checkQuery.bindValue(":primaryKey", QString::fromStdString(primaryKey));
-  if (!checkQuery.exec() || !checkQuery.next())
-  {
-    diagnostic(LogLevel::Error, "Failed to check for existing row.");
-    return false;
-  }
+// Helper function to convert the entire table from absolute paths to filenames
+bool convertTableToUseFilenames(QSqlDatabase& db, const DiagnosticFunction& diagnostic)
+{
+    if (!db.isOpen())
+    {
+        diagnostic(LogLevel::Error, "Database is not open.");
+        return false;
+    }
 
-  bool rowExists = checkQuery.value(0).toInt() > 0;
+    // Start a transaction
+    if (!db.transaction())
+    {
+        diagnostic(LogLevel::Error, "Failed to start database transaction: " + db.lastError().text().toStdString());
+        return false;
+    }
 
-  QSqlQuery query(db);
-  QString sql;
+    // Select all rows from the table
+    QSqlQuery selectQuery(db);
+    if (!selectQuery.exec("SELECT absolute_path FROM image_data"))
+    {
+        diagnostic(LogLevel::Error, "Failed to select absolute_path from image_data: " + selectQuery.lastError().text().toStdString());
+        db.rollback();
+        return false;
+    }
 
-  if (rowExists)
-  {
-    // Update the existing row
-    sql = QString("UPDATE image_data SET %1 = :value WHERE absolute_path = :primaryKey")
-              .arg(QString::fromStdString(column_name));
-  }
-  else
-  {
-    // Insert a new row
-    sql = QString("INSERT INTO image_data (absolute_path, %1) VALUES (:primaryKey, :value)")
-              .arg(QString::fromStdString(column_name));
-  }
+    // Prepare the update query
+    QSqlQuery updateQuery(db);
+    updateQuery.prepare("UPDATE image_data SET absolute_path = :filename WHERE absolute_path = :absolute_path");
 
-  query.prepare(sql);
-  query.bindValue(":primaryKey", QString::fromStdString(primaryKey));
+    while (selectQuery.next())
+    {
+        QString absolutePath = selectQuery.value(0).toString();
+        QString filename = QFileInfo(absolutePath).fileName();
 
-  if constexpr (std::is_same_v<T, std::string>)
-  {
-    query.bindValue(":value", QString::fromStdString(value));
-  }
-  else
-  {
-    query.bindValue(":value", QVariant::fromValue(value));
-  }
+        updateQuery.bindValue(":filename", filename);
+        updateQuery.bindValue(":absolute_path", absolutePath);
 
-  if (!query.exec())
-  {
-    diagnostic(LogLevel::Error, "Failed to execute query: " + query.lastError().text().toStdString() +
-                                    "\nSource SQL: " + sql.toStdString());
-    return false;
-  }
+        if (!updateQuery.exec())
+        {
+            diagnostic(LogLevel::Error, "Failed to update absolute_path from " + absolutePath.toStdString() + " to " + filename.toStdString() + ": " + updateQuery.lastError().text().toStdString());
+            db.rollback();
+            return false;
+        }
+    }
 
-  // db.commit();
+    // Commit the transaction
+    if (!db.commit())
+    {
+        diagnostic(LogLevel::Error, "Failed to commit database transaction: " + db.lastError().text().toStdString());
+        return false;
+    }
 
-  return true;
+    return true;
 }
 
 template <typename T>
 std::optional<T> getColumnValue(QSqlDatabase& db, const DiagnosticFunction& diagnostic, const std::string& primaryKey,
                                 const std::string& columnName)
 {
-  if (!db.isOpen())
-  {
-    diagnostic(LogLevel::Error, "Database is not open.");
-    return std::nullopt;
-  }
-
-  T defaultValue = getDefaultDatabaseValue<T>(columnName);
-
-  QSqlQuery query(db);
-  query.prepare("SELECT " + QString::fromStdString(columnName) + " FROM image_data WHERE absolute_path = :primaryKey");
-  query.bindValue(":primaryKey", QString::fromStdString(primaryKey));
-
-  if (!query.exec())
-  {
-    diagnostic(LogLevel::Error, "Failed to execute query: " + query.lastError().text().toStdString());
-    return std::nullopt;
-  }
-
-  if (query.next())
-  {
-    if constexpr (std::is_same_v<T, std::string>)
+    if (!db.isOpen())
     {
-      // Always convert to std::string for string types
-      std::string strValue = query.value(0).toString().toStdString();
-      return (strValue != defaultValue) ? std::optional<T>{ strValue } : std::nullopt;
+        diagnostic(LogLevel::Error, "Database is not open.");
+        return std::nullopt;
+    }
+
+    T defaultValue = getDefaultDatabaseValue<T>(columnName);
+
+    // Convert primaryKey to filename
+    std::string filename = extractFilename(primaryKey);
+
+    // Attempt to retrieve the value using the filename
+    QSqlQuery query(db);
+    query.prepare("SELECT " + QString::fromStdString(columnName) + " FROM image_data WHERE absolute_path = :primaryKey");
+    query.bindValue(":primaryKey", QString::fromStdString(filename));
+
+    if (!query.exec())
+    {
+        diagnostic(LogLevel::Error, "Failed to execute query: " + query.lastError().text().toStdString());
+        return std::nullopt;
+    }
+
+    if (query.next())
+    {
+        // Value found, return it
+        if constexpr (std::is_same_v<T, std::string>)
+        {
+            std::string strValue = query.value(0).toString().toStdString();
+            return (strValue != defaultValue) ? std::optional<T>{ strValue } : std::nullopt;
+        }
+        else
+        {
+            T typedValue = query.value(0).value<T>();
+            return (typedValue != defaultValue) ? std::optional<T>{ typedValue } : std::nullopt;
+        }
     }
     else
     {
-      T typedValue = query.value(0).value<T>();
-      return (typedValue != defaultValue) ? std::optional<T>{ typedValue } : std::nullopt;
+        // Lookup failed, convert the entire table
+        if (!convertTableToUseFilenames(db, diagnostic))
+        {
+            return std::nullopt; // Conversion failed
+        }
+
+        // Retry the query
+        query.clear();
+        query.prepare("SELECT " + QString::fromStdString(columnName) + " FROM image_data WHERE absolute_path = :primaryKey");
+        query.bindValue(":primaryKey", QString::fromStdString(filename));
+
+        if (!query.exec())
+        {
+            diagnostic(LogLevel::Error, "Failed to execute query after table conversion: " + query.lastError().text().toStdString());
+            return std::nullopt;
+        }
+
+        if (query.next())
+        {
+            // Value found after conversion
+            if constexpr (std::is_same_v<T, std::string>)
+            {
+                std::string strValue = query.value(0).toString().toStdString();
+                return (strValue != defaultValue) ? std::optional<T>{ strValue } : std::nullopt;
+            }
+            else
+            {
+                T typedValue = query.value(0).value<T>();
+                return (typedValue != defaultValue) ? std::optional<T>{ typedValue } : std::nullopt;
+            }
+        }
+        else
+        {
+            return std::nullopt; // Still not found
+        }
     }
-  }
-  else
-  {
-    return std::nullopt;
-  }
+}
+
+template <typename T>
+bool setColumnValue(QSqlDatabase& db, const DiagnosticFunction& diagnostic, const std::string& primaryKey,
+                    const std::string& column_name, const T& value)
+{
+    if (!db.isOpen())
+    {
+        diagnostic(LogLevel::Error, "Database is not open.");
+        return false;
+    }
+
+    // Convert primaryKey to filename
+    std::string filename = extractFilename(primaryKey);
+
+    // Check if the row exists
+    QSqlQuery checkQuery(db);
+    checkQuery.prepare("SELECT COUNT(*) FROM image_data WHERE absolute_path = :primaryKey");
+    checkQuery.bindValue(":primaryKey", QString::fromStdString(filename));
+    if (!checkQuery.exec() || !checkQuery.next())
+    {
+        diagnostic(LogLevel::Error, "Failed to check for existing row.");
+        return false;
+    }
+
+    bool rowExists = checkQuery.value(0).toInt() > 0;
+
+    if (!rowExists)
+    {
+        // Convert the entire table
+        if (!convertTableToUseFilenames(db, diagnostic))
+        {
+            return false; // Conversion failed
+        }
+
+        // Retry checking if the row exists
+        checkQuery.clear();
+        checkQuery.prepare("SELECT COUNT(*) FROM image_data WHERE absolute_path = :primaryKey");
+        checkQuery.bindValue(":primaryKey", QString::fromStdString(filename));
+        if (!checkQuery.exec() || !checkQuery.next())
+        {
+            diagnostic(LogLevel::Error, "Failed to check for existing row after table conversion.");
+            return false;
+        }
+
+        rowExists = checkQuery.value(0).toInt() > 0;
+    }
+
+    QSqlQuery query(db);
+    QString sql;
+
+    if (rowExists)
+    {
+        // Update the existing row
+        sql = QString("UPDATE image_data SET %1 = :value WHERE absolute_path = :primaryKey")
+                  .arg(QString::fromStdString(column_name));
+    }
+    else
+    {
+        // Insert a new row
+        sql = QString("INSERT INTO image_data (absolute_path, %1) VALUES (:primaryKey, :value)")
+                  .arg(QString::fromStdString(column_name));
+    }
+
+    query.prepare(sql);
+    query.bindValue(":primaryKey", QString::fromStdString(filename));
+
+    if constexpr (std::is_same_v<T, std::string>)
+    {
+        query.bindValue(":value", QString::fromStdString(value));
+    }
+    else
+    {
+        query.bindValue(":value", QVariant::fromValue(value));
+    }
+
+    if (!query.exec())
+    {
+        diagnostic(LogLevel::Error, "Failed to execute query: " + query.lastError().text().toStdString() +
+                                        "\nSource SQL: " + sql.toStdString());
+        return false;
+    }
+
+    return true;
 }
 
 DatabaseManager::DatabaseManager(DiagnosticFunction diagnostic_function) : diagnostic_function_(diagnostic_function)

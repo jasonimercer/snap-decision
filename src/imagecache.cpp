@@ -35,7 +35,7 @@ static QPixmap loadPixmap(const std::string& image_path)
   {
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-    std::cout << image_path << " 1: " << duration.count() << " microseconds" << std::endl;
+    // std::cout << image_path << " 1: " << duration.count() << " microseconds" << std::endl;
 
     return QPixmap::fromImage(img);
   }
@@ -46,7 +46,7 @@ static QPixmap loadPixmap(const std::string& image_path)
   {
     auto stop = std::chrono::high_resolution_clock::now();
     auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-    std::cout << image_path << " 2: " << duration.count() << " microseconds" << std::endl;
+    // std::cout << image_path << " 2: " << duration.count() << " microseconds" << std::endl;
 
     return QPixmap();
   }
@@ -55,7 +55,7 @@ static QPixmap loadPixmap(const std::string& image_path)
   QImage img = img_reader.read();
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
-  std::cout << image_path << " 3: " << duration.count() << " microseconds" << std::endl;
+  // std::cout << image_path << " 3: " << duration.count() << " microseconds" << std::endl;
   return QPixmap::fromImage(img);
 }
 
