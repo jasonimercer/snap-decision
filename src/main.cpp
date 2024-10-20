@@ -10,20 +10,32 @@
 #include "snapdecision/settings.h"
 #include "snapdecision/taskqueue.h"
 
+#include <functional>
+
+std::function<void(QString)> diag_chain_;
+
 void diag(LogLevel level, const std::string& message)
 {
+  const auto d = [](const std::string& m) {
+    qDebug() << m.c_str() << "\n";
+    if (diag_chain_)
+    {
+      diag_chain_(QString::fromStdString(m));
+    }
+  };
+
   switch (level)
   {
     case LogLevel::Error:
-      qDebug() << "ERROR: " << message.c_str() << "\n";
+      d("ERROR: " + message);
       break;
 
     case LogLevel::Warn:
-      qDebug() << "WARN: " << message.c_str() << "\n";
+      d("WARN: " + message);
       break;
 
     case LogLevel::Info:
-      qDebug() << "INFO: " << message.c_str() << "\n";
+      d("INFO: " + message);
       break;
   }
 }
@@ -163,6 +175,10 @@ int main(int argc, char* argv[])
 
   MainWindow w;
   MainController c(&m, &w, &settings);
+
+  diag_chain_ = [&c](const QString& message){
+    c.debug(message);
+  };
 
   if (args.size() > 1)
   {

@@ -34,7 +34,7 @@ public:
 
   GetSettings get_settings_;
 
-  ImageDescriptionNode::Ptr lookup(const std::string& full_path);
+  ImageDescriptionNode::Ptr& lookup(const std::string& full_path);
 
   bool remove(const std::string& full_path);
 

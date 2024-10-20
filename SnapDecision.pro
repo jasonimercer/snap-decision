@@ -7,7 +7,7 @@ INCLUDEPATH += include
 # INCLUDEPATH += D:/programming/opencv/build/include
 
 
-VERSION = 0.1.2.0
+VERSION = 0.1.3.0
 
 
 # INCLUDEPATH += D:/programming/onnxruntime-win-x64-1.16.3/include

@@ -273,7 +273,7 @@ ImageDescriptionNode::Ptr buildImageDescriptionNode(const std::string& filename,
   auto node = std::make_shared<ImageDescriptionNode>();
   QFileInfo file_info(q_filename);
 
-  node->filename = file_info.fileName().toStdString();
+  node->filename = extractFilename(q_filename.toStdString());
 
   node->full_path = file_info.absoluteFilePath().toStdString();
   node->full_raw_path = findRawImage(node->full_path);
@@ -288,6 +288,10 @@ ImageDescriptionNode::Ptr buildImageDescriptionNode(const std::string& filename,
   if (database_manager->getLocation() != db_path)
   {
     database_manager->switchToFileBased(db_path);
+
+    setFileHidden(QString::fromStdString(db_path));
+    setFileHidden(QString::fromStdString(db_path + "-shm"));
+    setFileHidden(QString::fromStdString(db_path + "-wal"));
   }
 
   node->decision = database_manager->getDecision(node->full_path).value_or(DecisionType::Unclassified);

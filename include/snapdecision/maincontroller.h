@@ -16,6 +16,8 @@ class MainController : public QObject
 public:
   MainController(MainModel* model, MainWindow* view, Settings* settings);
 
+  void debug(const QString& txt);
+
 public slots:  // Slot declaration
   void treeBuildComplete();
   void loadResource(const QString& path);
@@ -27,6 +29,7 @@ public slots:  // Slot declaration
 private:
   void executeTool(int i);
   void removeAllDecisions();
+  void showInExplorer(const QString& path);
 
   void voteAdjust(const ImageDescriptionNode::Ptr& ptr, int direction);
   void voteSet(const ImageDescriptionNode::Ptr& ptr, DecisionType decision);

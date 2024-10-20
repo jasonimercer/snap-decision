@@ -1,4 +1,5 @@
 #include "snapdecision/imagegroup.h"
+#include "snapdecision/utils.h"
 
 #include <optional>
 
@@ -97,7 +98,7 @@ void ImageGroup::loadFiles(const std::vector<std::string>& filenames, const Imag
   map_.clear();
   for (const auto& node : flat_list_)
   {
-    map_[node->full_path] = node;
+    lookup(node->full_path) = node;
   }
 }
 
@@ -137,9 +138,9 @@ std::optional<int> ImageGroup::getIndexClosestTo(int index, ImageDescriptionNode
   return std::nullopt;
 }
 
-ImageDescriptionNode::Ptr ImageGroup::lookup(const std::string& full_path)
+ImageDescriptionNode::Ptr& ImageGroup::lookup(const std::string& full_path)
 {
-  return map_[full_path];
+  return map_[extractFilename(full_path)];
 }
 
 bool ImageGroup::remove(const std::string& full_path)
@@ -152,7 +153,7 @@ bool ImageGroup::remove(const std::string& full_path)
   }
 
   std::erase(flat_list_, node);
-  map_[full_path] = nullptr;
+  lookup(full_path) = nullptr;
 
   return true;
 }

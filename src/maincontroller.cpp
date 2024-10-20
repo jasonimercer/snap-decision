@@ -1,17 +1,18 @@
 #include "snapdecision/maincontroller.h"
 
 #include <QByteArray>
+#include <QDesktopServices>
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
 #include <QObject>
+#include <QStringList>
+#include <QUrl>
 #include <cmath>
 #include <iostream>
 #include <optional>
 #include <sstream>
 #include <string>
-#include <QImageReader>
-#include <QStringList>
 
 #include "snapdecision/enums.h"
 #include "snapdecision/mainwindow.h"
@@ -578,6 +579,10 @@ void MainController::moveDeleteMarked()
       {
         removed++;
       }
+      else
+      {
+        debug(QString("Failed to remove '%1' from image_group").arg(QString::fromStdString(source_file)));
+      }
 
       if (!node->full_raw_path.empty())
       {
@@ -590,11 +595,25 @@ void MainController::moveDeleteMarked()
 
       model_->database_manager_->removeRowForPath(node->full_path);
     }
+    else
+    {
+      debug(QString("Failed to lookup '%1'").arg(QString::fromStdString(source_file)));
+    }
   }
   if (removed > 0)
   {
     model_->image_group_->onFileListLoadComplete();
     updateDecisionCounts();
+  }
+
+  debug(QString("Deleted '%1'").arg(removed));
+}
+
+void MainController::debug(const QString& txt)
+{
+  if (view_)
+  {
+    view_->ui->txtDebugOutput->append(txt);
   }
 }
 
@@ -670,6 +689,12 @@ void MainController::removeAllDecisions()
   }
 }
 
+void MainController::showInExplorer(const QString& path)
+{
+  QUrl url = QUrl::fromLocalFile(path);
+  QDesktopServices::openUrl(url);
+}
+
 ImageDescriptionNode::Ptr MainController::currentNode()
 {
   return model_->image_group_->getNodeAtIndex(current_focus_index_);
@@ -683,8 +708,6 @@ DecisionType MainController::currentDecision()
   }
   return DecisionType::Unknown;
 }
-
-
 
 void MainController::voteAdjust(const ImageDescriptionNode::Ptr& ptr, int direction)
 {
@@ -712,7 +735,6 @@ void MainController::voteSet(const ImageDescriptionNode::Ptr& ptr, DecisionType 
       updateDecisionCounts();
     }
   }
-
 }
 
 int MainController::predictNextNode(int step) const

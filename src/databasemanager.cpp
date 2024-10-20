@@ -14,6 +14,7 @@
 #include <type_traits>
 
 #include "snapdecision/enums.h"
+#include "snapdecision/utils.h"
 
 std::string describeDatabase(const QSqlDatabase& db)
 {
@@ -101,229 +102,227 @@ T getDefaultDatabaseValue(const std::string& column_name)
   throw std::invalid_argument("Invalid column name or type for default value: " + column_name);
 }
 
-// Helper function to extract filename from absolute path
-std::string extractFilename(const std::string& absolutePath)
-{
-    return QFileInfo(QString::fromStdString(absolutePath)).fileName().toStdString();
-}
-
 // Helper function to convert the entire table from absolute paths to filenames
 bool convertTableToUseFilenames(QSqlDatabase& db, const DiagnosticFunction& diagnostic)
 {
-    if (!db.isOpen())
+  if (!db.isOpen())
+  {
+    diagnostic(LogLevel::Error, "Database is not open.");
+    return false;
+  }
+
+  // Start a transaction
+  if (!db.transaction())
+  {
+    diagnostic(LogLevel::Error, "Failed to start database transaction: " + db.lastError().text().toStdString());
+    return false;
+  }
+
+  // Select all rows from the table
+  QSqlQuery selectQuery(db);
+  if (!selectQuery.exec("SELECT absolute_path FROM image_data"))
+  {
+    diagnostic(LogLevel::Error,
+               "Failed to select absolute_path from image_data: " + selectQuery.lastError().text().toStdString());
+    db.rollback();
+    return false;
+  }
+
+  // Prepare the update query
+  QSqlQuery updateQuery(db);
+  updateQuery.prepare("UPDATE image_data SET absolute_path = :filename WHERE absolute_path = :absolute_path");
+
+  while (selectQuery.next())
+  {
+    QString absolutePath = selectQuery.value(0).toString();
+    QString filename = QFileInfo(absolutePath).fileName();
+
+    updateQuery.bindValue(":filename", filename);
+    updateQuery.bindValue(":absolute_path", absolutePath);
+
+    if (!updateQuery.exec())
     {
-        diagnostic(LogLevel::Error, "Database is not open.");
-        return false;
+      diagnostic(LogLevel::Error, "Failed to update absolute_path from " + absolutePath.toStdString() + " to " +
+                                      filename.toStdString() + ": " + updateQuery.lastError().text().toStdString());
+      db.rollback();
+      return false;
     }
+  }
 
-    // Start a transaction
-    if (!db.transaction())
-    {
-        diagnostic(LogLevel::Error, "Failed to start database transaction: " + db.lastError().text().toStdString());
-        return false;
-    }
+  // Commit the transaction
+  if (!db.commit())
+  {
+    diagnostic(LogLevel::Error, "Failed to commit database transaction: " + db.lastError().text().toStdString());
+    return false;
+  }
 
-    // Select all rows from the table
-    QSqlQuery selectQuery(db);
-    if (!selectQuery.exec("SELECT absolute_path FROM image_data"))
-    {
-        diagnostic(LogLevel::Error, "Failed to select absolute_path from image_data: " + selectQuery.lastError().text().toStdString());
-        db.rollback();
-        return false;
-    }
-
-    // Prepare the update query
-    QSqlQuery updateQuery(db);
-    updateQuery.prepare("UPDATE image_data SET absolute_path = :filename WHERE absolute_path = :absolute_path");
-
-    while (selectQuery.next())
-    {
-        QString absolutePath = selectQuery.value(0).toString();
-        QString filename = QFileInfo(absolutePath).fileName();
-
-        updateQuery.bindValue(":filename", filename);
-        updateQuery.bindValue(":absolute_path", absolutePath);
-
-        if (!updateQuery.exec())
-        {
-            diagnostic(LogLevel::Error, "Failed to update absolute_path from " + absolutePath.toStdString() + " to " + filename.toStdString() + ": " + updateQuery.lastError().text().toStdString());
-            db.rollback();
-            return false;
-        }
-    }
-
-    // Commit the transaction
-    if (!db.commit())
-    {
-        diagnostic(LogLevel::Error, "Failed to commit database transaction: " + db.lastError().text().toStdString());
-        return false;
-    }
-
-    return true;
+  return true;
 }
 
 template <typename T>
 std::optional<T> getColumnValue(QSqlDatabase& db, const DiagnosticFunction& diagnostic, const std::string& primaryKey,
                                 const std::string& columnName)
 {
-    if (!db.isOpen())
+  if (!db.isOpen())
+  {
+    diagnostic(LogLevel::Error, "Database is not open.");
+    return std::nullopt;
+  }
+
+  T defaultValue = getDefaultDatabaseValue<T>(columnName);
+
+  // Convert primaryKey to filename
+  std::string filename = extractFilename(primaryKey);
+
+  // Attempt to retrieve the value using the filename
+  QSqlQuery query(db);
+  query.prepare("SELECT " + QString::fromStdString(columnName) + " FROM image_data WHERE absolute_path = :primaryKey");
+  query.bindValue(":primaryKey", QString::fromStdString(filename));
+
+  if (!query.exec())
+  {
+    diagnostic(LogLevel::Error, "Failed to execute query: " + query.lastError().text().toStdString());
+    return std::nullopt;
+  }
+
+  if (query.next())
+  {
+    // Value found, return it
+    if constexpr (std::is_same_v<T, std::string>)
     {
-        diagnostic(LogLevel::Error, "Database is not open.");
-        return std::nullopt;
+      std::string strValue = query.value(0).toString().toStdString();
+      return (strValue != defaultValue) ? std::optional<T>{ strValue } : std::nullopt;
+    }
+    else
+    {
+      T typedValue = query.value(0).value<T>();
+      return (typedValue != defaultValue) ? std::optional<T>{ typedValue } : std::nullopt;
+    }
+  }
+  else
+  {
+    // Lookup failed, convert the entire table
+    if (!convertTableToUseFilenames(db, diagnostic))
+    {
+      return std::nullopt;  // Conversion failed
     }
 
-    T defaultValue = getDefaultDatabaseValue<T>(columnName);
-
-    // Convert primaryKey to filename
-    std::string filename = extractFilename(primaryKey);
-
-    // Attempt to retrieve the value using the filename
-    QSqlQuery query(db);
-    query.prepare("SELECT " + QString::fromStdString(columnName) + " FROM image_data WHERE absolute_path = :primaryKey");
+    // Retry the query
+    query.clear();
+    query.prepare("SELECT " + QString::fromStdString(columnName) +
+                  " FROM image_data WHERE absolute_path = :primaryKey");
     query.bindValue(":primaryKey", QString::fromStdString(filename));
 
     if (!query.exec())
     {
-        diagnostic(LogLevel::Error, "Failed to execute query: " + query.lastError().text().toStdString());
-        return std::nullopt;
+      diagnostic(LogLevel::Error,
+                 "Failed to execute query after table conversion: " + query.lastError().text().toStdString());
+      return std::nullopt;
     }
 
     if (query.next())
     {
-        // Value found, return it
-        if constexpr (std::is_same_v<T, std::string>)
-        {
-            std::string strValue = query.value(0).toString().toStdString();
-            return (strValue != defaultValue) ? std::optional<T>{ strValue } : std::nullopt;
-        }
-        else
-        {
-            T typedValue = query.value(0).value<T>();
-            return (typedValue != defaultValue) ? std::optional<T>{ typedValue } : std::nullopt;
-        }
+      // Value found after conversion
+      if constexpr (std::is_same_v<T, std::string>)
+      {
+        std::string strValue = query.value(0).toString().toStdString();
+        return (strValue != defaultValue) ? std::optional<T>{ strValue } : std::nullopt;
+      }
+      else
+      {
+        T typedValue = query.value(0).value<T>();
+        return (typedValue != defaultValue) ? std::optional<T>{ typedValue } : std::nullopt;
+      }
     }
     else
     {
-        // Lookup failed, convert the entire table
-        if (!convertTableToUseFilenames(db, diagnostic))
-        {
-            return std::nullopt; // Conversion failed
-        }
-
-        // Retry the query
-        query.clear();
-        query.prepare("SELECT " + QString::fromStdString(columnName) + " FROM image_data WHERE absolute_path = :primaryKey");
-        query.bindValue(":primaryKey", QString::fromStdString(filename));
-
-        if (!query.exec())
-        {
-            diagnostic(LogLevel::Error, "Failed to execute query after table conversion: " + query.lastError().text().toStdString());
-            return std::nullopt;
-        }
-
-        if (query.next())
-        {
-            // Value found after conversion
-            if constexpr (std::is_same_v<T, std::string>)
-            {
-                std::string strValue = query.value(0).toString().toStdString();
-                return (strValue != defaultValue) ? std::optional<T>{ strValue } : std::nullopt;
-            }
-            else
-            {
-                T typedValue = query.value(0).value<T>();
-                return (typedValue != defaultValue) ? std::optional<T>{ typedValue } : std::nullopt;
-            }
-        }
-        else
-        {
-            return std::nullopt; // Still not found
-        }
+      return std::nullopt;  // Still not found
     }
+  }
 }
 
 template <typename T>
 bool setColumnValue(QSqlDatabase& db, const DiagnosticFunction& diagnostic, const std::string& primaryKey,
                     const std::string& column_name, const T& value)
 {
-    if (!db.isOpen())
+  if (!db.isOpen())
+  {
+    diagnostic(LogLevel::Error, "Database is not open.");
+    return false;
+  }
+
+  // Convert primaryKey to filename
+  std::string filename = extractFilename(primaryKey);
+
+  // Check if the row exists
+  QSqlQuery checkQuery(db);
+  checkQuery.prepare("SELECT COUNT(*) FROM image_data WHERE absolute_path = :primaryKey");
+  checkQuery.bindValue(":primaryKey", QString::fromStdString(filename));
+  if (!checkQuery.exec() || !checkQuery.next())
+  {
+    diagnostic(LogLevel::Error, "Failed to check for existing row.");
+    return false;
+  }
+
+  bool rowExists = checkQuery.value(0).toInt() > 0;
+
+  if (!rowExists)
+  {
+    // Convert the entire table
+    if (!convertTableToUseFilenames(db, diagnostic))
     {
-        diagnostic(LogLevel::Error, "Database is not open.");
-        return false;
+      return false;  // Conversion failed
     }
 
-    // Convert primaryKey to filename
-    std::string filename = extractFilename(primaryKey);
-
-    // Check if the row exists
-    QSqlQuery checkQuery(db);
+    // Retry checking if the row exists
+    checkQuery.clear();
     checkQuery.prepare("SELECT COUNT(*) FROM image_data WHERE absolute_path = :primaryKey");
     checkQuery.bindValue(":primaryKey", QString::fromStdString(filename));
     if (!checkQuery.exec() || !checkQuery.next())
     {
-        diagnostic(LogLevel::Error, "Failed to check for existing row.");
-        return false;
+      diagnostic(LogLevel::Error, "Failed to check for existing row after table conversion.");
+      return false;
     }
 
-    bool rowExists = checkQuery.value(0).toInt() > 0;
+    rowExists = checkQuery.value(0).toInt() > 0;
+  }
 
-    if (!rowExists)
-    {
-        // Convert the entire table
-        if (!convertTableToUseFilenames(db, diagnostic))
-        {
-            return false; // Conversion failed
-        }
+  QSqlQuery query(db);
+  QString sql;
 
-        // Retry checking if the row exists
-        checkQuery.clear();
-        checkQuery.prepare("SELECT COUNT(*) FROM image_data WHERE absolute_path = :primaryKey");
-        checkQuery.bindValue(":primaryKey", QString::fromStdString(filename));
-        if (!checkQuery.exec() || !checkQuery.next())
-        {
-            diagnostic(LogLevel::Error, "Failed to check for existing row after table conversion.");
-            return false;
-        }
+  if (rowExists)
+  {
+    // Update the existing row
+    sql = QString("UPDATE image_data SET %1 = :value WHERE absolute_path = :primaryKey")
+              .arg(QString::fromStdString(column_name));
+  }
+  else
+  {
+    // Insert a new row
+    sql = QString("INSERT INTO image_data (absolute_path, %1) VALUES (:primaryKey, :value)")
+              .arg(QString::fromStdString(column_name));
+  }
 
-        rowExists = checkQuery.value(0).toInt() > 0;
-    }
+  query.prepare(sql);
+  query.bindValue(":primaryKey", QString::fromStdString(filename));
 
-    QSqlQuery query(db);
-    QString sql;
+  if constexpr (std::is_same_v<T, std::string>)
+  {
+    query.bindValue(":value", QString::fromStdString(value));
+  }
+  else
+  {
+    query.bindValue(":value", QVariant::fromValue(value));
+  }
 
-    if (rowExists)
-    {
-        // Update the existing row
-        sql = QString("UPDATE image_data SET %1 = :value WHERE absolute_path = :primaryKey")
-                  .arg(QString::fromStdString(column_name));
-    }
-    else
-    {
-        // Insert a new row
-        sql = QString("INSERT INTO image_data (absolute_path, %1) VALUES (:primaryKey, :value)")
-                  .arg(QString::fromStdString(column_name));
-    }
+  if (!query.exec())
+  {
+    diagnostic(LogLevel::Error, "Failed to execute query: " + query.lastError().text().toStdString() +
+                                    "\nSource SQL: " + sql.toStdString());
+    return false;
+  }
 
-    query.prepare(sql);
-    query.bindValue(":primaryKey", QString::fromStdString(filename));
-
-    if constexpr (std::is_same_v<T, std::string>)
-    {
-        query.bindValue(":value", QString::fromStdString(value));
-    }
-    else
-    {
-        query.bindValue(":value", QVariant::fromValue(value));
-    }
-
-    if (!query.exec())
-    {
-        diagnostic(LogLevel::Error, "Failed to execute query: " + query.lastError().text().toStdString() +
-                                        "\nSource SQL: " + sql.toStdString());
-        return false;
-    }
-
-    return true;
+  return true;
 }
 
 DatabaseManager::DatabaseManager(DiagnosticFunction diagnostic_function) : diagnostic_function_(diagnostic_function)
@@ -632,6 +631,19 @@ bool DatabaseManager::removeRowForPath(const std::string& path)
     diagnostic_function_(LogLevel::Error, "Failed to delete row: " + query.lastError().text().toStdString());
     return false;
   }
+  else
+  {
+    int rows_affected = query.numRowsAffected();
+    if (rows_affected == 0)
+    {
+      const auto filename = extractFilename(path);
+
+      if (filename != path)
+      {
+        removeRowForPath(filename);
+      }
+    }
+  }
 
   return true;
 }
@@ -769,12 +781,12 @@ std::array<std::size_t, 5> DatabaseManager::getDecisionCounts()
         case DecisionType::Unclassified:
           counts[2] += query.value(1).toULongLong();
           break;
-      case DecisionType::Keep:
-        counts[3] += query.value(1).toULongLong();
-        break;
-      case DecisionType::SuperKeep:
-        counts[4] += query.value(1).toULongLong();
-        break;
+        case DecisionType::Keep:
+          counts[3] += query.value(1).toULongLong();
+          break;
+        case DecisionType::SuperKeep:
+          counts[4] += query.value(1).toULongLong();
+          break;
       }
     }
   }
