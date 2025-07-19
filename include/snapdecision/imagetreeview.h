@@ -16,6 +16,8 @@ public:
 
   void navigate(int direction);
 
+  bool isVisible(DecisionType decision_type) const;
+
   keyEventFunction key_event_function_;
 
 public slots:
@@ -27,8 +29,7 @@ protected:
   void keyPressEvent(QKeyEvent* event) override;
   void iterateChildHide(const QModelIndex &parent, ImageTreeModel* model);
 
-  bool isVisible(DecisionType decision_type) const;
-
+  bool superkeep_visible_{ true };
   bool keep_visible_{ true };
   bool unclassified_visible_{ true };
   bool delete_visible_{ true };

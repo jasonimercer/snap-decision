@@ -2,6 +2,7 @@
 
 #include <QByteArray>
 #include <QDesktopServices>
+#include <QMessageBox>
 #include <QFile>
 #include <QFileInfo>
 #include <QImageReader>
@@ -139,7 +140,18 @@ void MainController::setupConnections()
   connect(view_->ui->actionTool2, &QAction::triggered, this, [this]() { executeTool(1); });
   connect(view_->ui->actionTool3, &QAction::triggered, this, [this]() { executeTool(2); });
   connect(view_->ui->actionTool4, &QAction::triggered, this, [this]() { executeTool(3); });
-  connect(view_->ui->actionRemove_All_Decisions, &QAction::triggered, this, [this]() { removeAllDecisions(); });
+  connect(view_->ui->actionRemove_All_Decisions, &QAction::triggered, this, [this]() {
+    const auto reply = QMessageBox::question(
+      view_,
+      "Confirm Restart All Decisions",
+      "Are you sure you want to reset all decisions to the starting state?\n\nThis process cannot be undone.",
+      QMessageBox::Yes | QMessageBox::No
+    );
+
+    if (reply == QMessageBox::Yes) {
+      removeAllDecisions();
+    }
+  });
 
   connect(view_->ui->category_display, &CategoryDisplayWidget::activeChange, this,
           [this](DecisionType d, bool visible) { view_->ui->treeView->setDecisionVisible(d, visible); });
@@ -293,9 +305,28 @@ void MainController::focusOnNode(const QString& image_name)
     previous_focus_index_ = current_focus_index_;
     current_focus_index_ = current.value();
 
-    const auto probably_next = predictNextNode(1);
+    const auto next_direction = predictNextDirection();
 
-    if (const auto next_node = image_group_->getNodeAtIndex(probably_next); next_node)
+    // current_focus_index_, next_direction
+
+
+    // ImageDescriptionNode::Ptr ImageGroup::findNode(const std::function<int ()>& index_generator, const std::function<bool (const ImageDescriptionNode::Ptr&)>& predicate) const
+
+    int index = current_focus_index_;
+    auto idx_gen = [&index, &next_direction]() {
+      index += next_direction;
+      return index;
+    };
+
+    auto is_visible = [this](const ImageDescriptionNode::Ptr& node) -> bool {
+      if (!node)
+      {
+        return false;
+      }
+      return view_->ui->treeView->isVisible(node->decision);
+    };
+
+    if (const auto next_node = image_group_->findNode(idx_gen, is_visible); next_node)
     {
       next_node->image_cache_handle_->scheduleImage();
     }
@@ -737,11 +768,11 @@ void MainController::voteSet(const ImageDescriptionNode::Ptr& ptr, DecisionType 
   }
 }
 
-int MainController::predictNextNode(int step) const
+int MainController::predictNextDirection() const
 {
   if (previous_focus_index_ < current_focus_index_)
   {
-    return current_focus_index_ + step;
+    return 1;
   }
-  return current_focus_index_ - step;
+  return -1;
 }

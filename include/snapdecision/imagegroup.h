@@ -27,6 +27,10 @@ public:
 
   ImageDescriptionNode::Ptr getNodeAtIndex(int index) const;
 
+  ImageDescriptionNode::Ptr findNode(
+      const std::function<int()>& index_generator,
+      const std::function<bool(const ImageDescriptionNode::Ptr&)>& predicate) const;
+
   std::optional<int> getIndexClosestTo(int index, ImageDescriptionNode* ptr) const;
 
   std::vector<ImageDescriptionNode::Ptr> flat_list_;

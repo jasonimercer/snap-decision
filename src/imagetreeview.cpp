@@ -168,8 +168,10 @@ bool ImageTreeView::isVisible(DecisionType decision_type) const
 {
   switch (decision_type)
   {
-    case DecisionType::Keep:
-      return keep_visible_;
+  case DecisionType::SuperKeep:
+    return superkeep_visible_;
+  case DecisionType::Keep:
+    return keep_visible_;
     case DecisionType::Unclassified:
       return unclassified_visible_;
     case DecisionType::Delete:
@@ -183,6 +185,9 @@ void ImageTreeView::setDecisionVisible(DecisionType d, bool visible)
 {
   switch (d)
   {
+    case DecisionType::SuperKeep:
+      superkeep_visible_ = visible;
+      break;
     case DecisionType::Keep:
       keep_visible_ = visible;
       break;

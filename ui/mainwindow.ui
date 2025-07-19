@@ -45,7 +45,7 @@
          </size>
         </property>
         <property name="toolTip">
-         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Clicking on these colors will apply or remove a one-time filter to hide or show images of the corresponding classification.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
+         <string>&lt;html&gt;&lt;head/&gt;&lt;body&gt;&lt;p&gt;Clicking on these colors will apply or remove a filter to hide or show images of the corresponding classification.&lt;/p&gt;&lt;/body&gt;&lt;/html&gt;</string>
         </property>
         <property name="frameShape">
          <enum>QFrame::StyledPanel</enum>
@@ -525,6 +525,7 @@ li.checked::marker { content: &quot;\2612&quot;; }
      <string>&amp;Tools</string>
     </property>
     <addaction name="action_Move_Delete"/>
+    <addaction name="separator"/>
     <addaction name="actionRemove_All_Decisions"/>
     <addaction name="separator"/>
     <addaction name="actionTool1"/>
@@ -596,7 +597,10 @@ li.checked::marker { content: &quot;\2612&quot;; }
   </action>
   <action name="actionRemove_All_Decisions">
    <property name="text">
-    <string>Remove All Decisions</string>
+    <string>Restart All Decisions</string>
+   </property>
+   <property name="toolTip">
+    <string>Clear the decisions you have made back to the starting state</string>
    </property>
    <property name="shortcut">
     <string>Ctrl+Shift+R</string>

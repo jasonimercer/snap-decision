@@ -117,6 +117,19 @@ ImageDescriptionNode::Ptr ImageGroup::getNodeAtIndex(int index) const
   return flat_list_[index % flat_list_.size()];
 }
 
+ImageDescriptionNode::Ptr ImageGroup::findNode(const std::function<int ()>& index_generator, const std::function<bool (const ImageDescriptionNode::Ptr&)>& predicate) const
+{
+  for (std::size_t i = 0; i < flat_list_.size(); i++)
+  {
+    auto n = getNodeAtIndex(index_generator());
+    if (predicate(n))
+    {
+      return n;
+    }
+  }
+  return nullptr;
+}
+
 std::optional<int> ImageGroup::getIndexClosestTo(int index, ImageDescriptionNode* ptr) const
 {
   if (flat_list_.empty() || !ptr)

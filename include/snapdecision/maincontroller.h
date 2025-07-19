@@ -44,13 +44,12 @@ private:
   MainWindow* view_;
   Settings* settings_;
 
-
   int previous_focus_index_{ -1 };
   int current_focus_index_{ -1 };
   QString resource_;
   QString current_image_full_path_;
 
-  int predictNextNode(int step) const;
+  int predictNextDirection() const;
 
   void setupConnections();
 };

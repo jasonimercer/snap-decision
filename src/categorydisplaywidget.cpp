@@ -258,7 +258,7 @@ void CategoryDisplayWidget::paintEvent(QPaintEvent* event)
       QBrush brush(pixmap);
       painter.fillRect(keepRect, brush);
       painter.setPen(QPen(Qt::black));
-      painter.drawText(keepRect, Qt::AlignCenter, QString::number(superkeep_count_));
+      painter.drawText(keepRect, Qt::AlignCenter, QString::number(keep_count_));
     }
 
     if (superkeep_count_ && superkeep_active_)
